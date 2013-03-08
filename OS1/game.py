@@ -31,19 +31,24 @@ class client(threading.Thread):
 		print 'start receiving status report'
 		status_all()
 		msgRcvList = [0]*6
+		#while loop the keep receiving response from pig
 		#receive data
 		data = "{\"msg_id\":\"123\"}"
 		receive_msg(data)
 
 	def stop(self):
 		print 'stop receiving status report'
-		global attckingPig
+		global attackingPig
+		#when the admin not receiving attackingPig(target)'s 
+		#message, directly order it die.
 		if attackingPig != -1 and msgRcvList[attackingPig] == 0:
 			killPig()
 			msg = directOrder()
 			#send message
 			jmsg = json.dump(msg)
 
+		#when the attacking position if a stone, ask the pig
+		#behind it(if any) get hurt
 		if attackingStone != -1:
 			if objLocList[attackingStone+1] in range(1, 7) :
 				vals = {}
@@ -54,6 +59,7 @@ class client(threading.Thread):
 				jmsg = json.dump(msg)
 
 class pigInfo:
+	#a record of a pig
 	def __init__(self, ID, loc, port):
 		self.iden = ID
 		self.loc = loc
@@ -111,6 +117,7 @@ def initialize():
 	for i in range(nPig, nPig+7):
 		objLocList[locList[i]] = 20
 	
+	#set neighbor list in pig info based on their position
 	arrangeNeighbors()
 
 	#start the connection
@@ -137,7 +144,8 @@ def receive_msg(data):
 			msgRcvList[int(pig_id)-1] = 1
 			pig = pigList[int(pig_id-1)]
 			pig.status = pig_status
-		
+	
+	#status report from pigs
 	elif msg_type == 4:
 		msg_id = msg_json['msg_id']
 		pig_id = msg_json['pig_id']
@@ -160,6 +168,7 @@ def constructMsg(msg_type, values):
 	t = time.time()
 	global current_bird
 
+	#bird attack
 	if msg_type == 1:
 		msg["type"] = 1
 		current_bird = t
@@ -171,6 +180,7 @@ def constructMsg(msg_type, values):
 		msg["hubC"] = 8
 #		print msg
 
+	#direct order
 	elif msg_type == 5:
 		msg["type"] = 5
 		msg["msg_id"] = current_bird
@@ -204,8 +214,12 @@ def setTimer1(cc):
 def setTimer2(cc):
 	print 'End of report time.'
 	cc.stop()
+	#set up neighbor list in pig info 
+	#after receiving status report from pigs
 	arrangeNeighbors()
+	#tell user the status of all objects
 	report_to_user()
+	#start over from initialize bird attack
 	start_game()
 
 def start_game():
@@ -261,12 +275,17 @@ def start_game():
 	#send message
 	jmsg = json.dump(msg)
 
-	#set timer for 5 sec.
+	#set timer for 2 sec.
+	#send bird attack message
 	cc = client(pigList[0].port)
 	t = threading.Timer(2.0, setTimer1, args=[cc])
 	t.start()
 
+	#wait for bird attack message spreading in P2P
 	time.sleep(2)
+
+	#send status_all() message to P2P to ask status
+	#wait for response message
 	t = threading.Timer(2.0, setTimer2, args=[cc])
 	t.start()
 
