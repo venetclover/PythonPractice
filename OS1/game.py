@@ -9,6 +9,7 @@ import json
 nPig = 6
 pigList = []
 attackingPig = -1
+attackingStone = -1
 msgRcvList = [0]*6
 current_bird = -1
 objLocList = []
@@ -27,23 +28,30 @@ class client(threading.Thread):
 		global msg_q
 		global pigList
 		global msgRcvList
-		print 'start'
+		print 'start receiving status report'
 		status_all()
 		msgRcvList = [0]*6
-		receive_msg("{\"msg_id\":\"123\"}")
-#		self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-#		self.s.bind(("127.0.0.1", self.c_port))
-#		while True:
-#			data = self.conn.recv(1024)
-#			print data
+		#receive data
+		data = "{\"msg_id\":\"123\"}"
+		receive_msg(data)
 
 	def stop(self):
-		print 'stop'
+		print 'stop receiving status report'
 		global attckingPig
-		if msgRcvList[attackingPig] == 0:
+		if attackingPig != -1 and msgRcvList[attackingPig] == 0:
 			killPig()
 			msg = directOrder()
 			#send message
+			jmsg = json.dump(msg)
+
+		if attackingStone != -1:
+			if objLocList[attackingStone+1] in range(1, 7) :
+				vals = {}
+				vals['status'] = 1
+				vals['dest' = objLocList[attckingStone+1]
+				msg = constructMsg(5, vals)
+				#send message
+				jmsg = json.dump(msg)
 
 class pigInfo:
 	def __init__(self, ID, loc, port):
@@ -95,7 +103,7 @@ def initialize():
 	portList = rand.sample(ports, nPig)
 	locList = rand.sample(locations, nPig+7)
 	for i in range(nPig):
-#		pig = new pigInst(i+1, portList[i])
+		pig = Pig("127.0.0.1", portList[i], i+1, locList[i], [i-1, i+1])
 		pigD = pigInfo(i+1, locList[i], portList[i])
                 pigList.append(pigD)
 		objLocList[locList[i]] = i+1
@@ -161,7 +169,7 @@ def constructMsg(msg_type, values):
 		msg["arr_time"] = values["arr_time"]
 		msg["time_pass"] = 0
 		msg["hubC"] = 8
-		print msg
+#		print msg
 
 	elif msg_type == 5:
 		msg["type"] = 5
@@ -170,7 +178,7 @@ def constructMsg(msg_type, values):
 		msg["dest"] = values["dest"]
 		msg["status"] = values["status"]
 		msg["hubC"] = 8
-		print msg
+#		print msg
 
 	return msg
 
@@ -180,8 +188,9 @@ def status_all():
 		vals["dest"] = pig.iden
 		vals["status"] = -1
 		msg = constructMsg(5, vals)
-
+		
 		#send message
+		jmsg = json.dump(msg)
 
 def report_to_user():
 	status_dict = {0:'killed', 1:'hurt', 2:'great'}
@@ -201,7 +210,9 @@ def setTimer2(cc):
 
 def start_game():
 	global attackingPig
+	global attackingStone
 	attackingPig = -1
+	attackingStone = -1
 	
 	str_pigs_loc = ''
 	stonesLoc = []
@@ -220,10 +231,13 @@ def start_game():
 	arr_time = int(raw_input())
 	print 'You want to attack '+ str(attackingPos) + '.'
 
-	#construct the attacking message
 	if objLocList[attackingPos] in range(1, 7):
 		attackingPig = objLocList[attackingPos]
 
+	if objLocList[attackingPos] == 20:
+		attackingStone = attackingPos
+
+	#construct the attacking message
 	attr = {}
 	attr["dest"] = attackingPos
 	if attackingPig != -1:
@@ -245,6 +259,7 @@ def start_game():
 	msg = constructMsg(1, attr)
 
 	#send message
+	jmsg = json.dump(msg)
 
 	#set timer for 5 sec.
 	cc = client(pigList[0].port)
