@@ -6,13 +6,14 @@ from node import node
 from bnet import bnet
 
 def main():
-#	net = constructNet()	#construct the given bayes net
-	net = constructNewNet()	#construct our own net
+	net = constructNet()	#construct the given bayes net
+#	net = constructNewNet()	#construct our own net
 #	mat = readFiles('data-train-1.txt')	
 #	likeliEst(mat, net)	#find the distribution(CPT)
 #	printCPTTex(net)
 #	ans = query(net, net.nodes[0], [-1,1,4,1,1,1,1,1,1])
 #	ans = query(net, net.nodes[3], [-1,1,1,-1,2,1,2,2,1])
+#	print ans
 #	trainingNet(net)
 	learningNet(net)	#train the Bayes net and estimate accuracy
 
@@ -57,8 +58,7 @@ def lookupCPT(cpt, filterList):
 				get = 0
 				break
 		if get == 1:
-			prob = row[1]
-	return prob
+			return row[1]
 
 def margin(targValue, targPos, table):
 	#pos is a list of magined element
@@ -96,9 +96,10 @@ def query(net, target, given):
 		prob = 1
 		#find all prob. value for all combination
 		for i, var in enumerate(row):
+			print i, lookupCPT(net.nodes[i].cpt, row)
 			prob *= lookupCPT(net.nodes[i].cpt, row)
 		lookupResults.append([row, prob])
-#		print row, prob
+		print row, prob
 
 	#Find the factor that need marginalize
 	margList = []
@@ -125,8 +126,8 @@ def query(net, target, given):
 def likeliEst(mat, net):
 	for n in net.nodes:
 		constructCPT(mat, net, n)
-		print 'node: ', n.name
-		print n.cpt
+#		print 'node: ', n.name
+#		print n.cpt
 
 def findCom(parents):
 	coms = []
@@ -234,18 +235,15 @@ def learningNet(net):
 		#construct all CPTs
 		likeliEst(mat, net)
 		probList2 = [0.0] * 5
-		for k in range(5):
-			data = readFiles('data-test-'+str(k+1)+'.txt')
-			accClassify = 0
-			for row in data:
-				if(classify(net, net.nodes[8], row) == True):
-					accClassify += 1
-			accClassifyRate = round(float(accClassify)/float(len(data)),6)
-			probList2[k] = accClassifyRate
+			
+		data = readFiles('data-test-'+str(i+1)+'.txt')
+		accClassify = 0
+		for row in data:
+			if(classify(net, net.nodes[8], row) == True):
+				accClassify += 1
+		accClassifyRate = round(float(accClassify)/float(len(data)),6)
 		
-		a = numpy.array(probList2, float)
-		print 'train'+str(i+1), probList2, 'mean=', a.mean(), 'standard dev=', a.std()
-		probList1[i] = a.mean()
+		probList1[i] = accClassifyRate
 	
 	b = numpy.array(probList1, float)
 	print 'total', probList1, 'mean=', b.mean(), 'standard dev=', b.std()

@@ -1,8 +1,15 @@
 import numpy as np
-from scipy.optimize import fmin_bfgs
+import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
+import matplotlib.cm as cm
+from scipy.optimize import fmin_cg
+from scipy.optimize import fmin_l_bfgs_b
+from scipy.optimize import fmin
 
 #out = open('/home/venet/Dropbox/Graphical Models/Assignment2A/output.txt', 'w')
 out = open('output.txt', 'w')
+t_para_ini = np.matrix(np.genfromtxt("model/transition-params.txt"))
+s_para_ini = np.matrix(np.genfromtxt("model/feature-params.txt"))
 char = {'e':0, 't':1, 'a':2, 'i':3, 'n':4, 'o':5, 's':6, 'h':7, 'r':8, 'd':9}
 invchar = dict([(v, k) for (k, v) in char.items()])
 
@@ -112,16 +119,247 @@ def obj_deriv(x):
 	sign = 1.0
 	dfdx0 = sign*(2 - 2*x[0] + 400*x[0]*x[1]-400*x[0]**3)
 	dfdx1 = sign*(-200*x[1]+200*x[0]**2)
+	print 'deriv=', np.array([dfdx0, dfdx1])
 	return np.array([dfdx0, dfdx1])
 
 def obj_func(x):
 	sign = 1.0
-	return sign * ((1-x[0])**2 + 100*(x[1]-x[0]**2) ** 2)
+	x = np.reshape(x, (2, 1))
+	x0= x[0,0]
+	x1= x[1,0]
+	print x
+	y = ((1-x0)**2 + 100*(x1-x0**2) ** 2)
+	return sign * y
+
+def marginal_w(beta, logZ, i, t):
+	"""docstring for marginal_w"""
+	if t == 0:
+		t_beta = np.sum(np.exp(beta), axis=1)
+	else:
+		t_beta = np.sum(np.exp(beta), axis=0)
+	t_beta = np.reshape(t_beta, (1, 10))
+	return t_beta[0,i]/np.exp(logZ)
+
+ansFile = 'data/train_words.txt'
+
+def obj_ws_deriv(x, *args):
+	sign = 1.0
+	N = args[0]
+	#feature-params: 3310, transition-params:100
+	x_s = x[0:3210]
+	x_t = x[3210:3310]
+	x_s = np.reshape(x_s, (10, 321))
+	x_t = np.reshape(x_t, (10,10))
+
+	x_deriv = np.zeros_like(x)
+	for i in range(N):
+		#find value based on real answer
+		m_word = np.matrix(np.genfromtxt("data/train_img"+str(i+1)+".txt"))
+		real_word = findAns(ansFile, i)
+		w_len = len(real_word)
+			
+		#find phi
+		potent = x_s * m_word.transpose()
+		phi_list = []
+		for cn in range(w_len-1):
+			if cn == w_len-2:
+				phi_list.append(phi(x_t, potent, [cn, cn+1]))
+			else:
+				phi_list.append(phi(x_t, potent, [cn]))
+		
+		#find clique
+		cliq_list = []
+		for cn in range(w_len-1):
+			cliq_list.append([cn, cn+1])
+
+		#find_sender
+		s_list = []
+		for cn in range(1, w_len-1):
+			s_list.append(cn)
+
+		beta_t = sumProductMPLS(cliq_list, s_list, phi_list)
+		logZ = logSumExp(beta_t[0])
+		
+		tmp_x_s = np.zeros(shape=(10,321))
+		tmp_x_t = np.zeros(shape=(10,10))
+		for j, c in enumerate(real_word):
+			if j == w_len-1:
+				pc = marginal_w(beta_t[j-1], logZ, char[c], 1)
+			else:
+				pc = marginal_w(beta_t[j], logZ, char[c], 0)
+			tmp_x_s[char[c],:] = 1 - pc*m_word[j,:]
+
+			if j < w_len-1:
+				c1 = real_word[j+1]
+				p1 = char[c]
+				p2 = char[c1]
+				t_beta = beta_t[j]
+				pw = np.exp(t_beta[p1,p2])/np.exp(logZ)
+				tmp_x_t[p1, p2] = 1 - pw
+
+		tmp_x_s = np.reshape(tmp_x_s, (3210))
+		tmp_x_t = np.reshape(tmp_x_t, (100))
+		x_deriv += np.array(np.concatenate((tmp_x_s, tmp_x_t), axis=1))
+	y1 = (1/float(N)) * x_deriv
+#	print 'y1', [k for k in y1 if k>1]
+	return (-1) * y1
+
+def obj_ws_func(x, *args):
+	"""docstring for obj_ws_func"""
+	sign = 1.0
+	N = args[0]
+	#feature-params: 3310, transition-params:100
+	x_s = x[0:3210]
+	x_t = x[3210:3310]
+	x_s = np.reshape(x_s, (10, 321))
+	x_t = np.reshape(x_t, (10,10))
+
+	t_diff = 0
+	for i in range(N):
+		tmp_v = 0
+		logZ = 0
+		#find value based on real answer
+		m_t_word = np.matrix(np.genfromtxt("data/train_img"+str(i+1)+".txt")).transpose()
+		real_word = findAns(ansFile, i)
+		w_len = len(real_word)
+		for j, c in enumerate(real_word):
+			v = x_s[char[c],:] * m_t_word[:,j]
+			tmp_v += v[0,0]
+		
+		for j in range(w_len-1):
+			c1 = real_word[j]
+			c2 = real_word[j+1]
+			tmp_v += x_t[char[c1],char[c2]]
+			
+		#find phi
+		potent = x_s * m_t_word
+		phi_list = []
+		for cn in range(w_len-1):
+			if cn == w_len-2:
+				phi_list.append(phi(x_t, potent, [cn, cn+1]))
+			else:
+				phi_list.append(phi(x_t, potent, [cn]))
+		
+		#find clique
+		cliq_list = []
+		for cn in range(w_len-1):
+			cliq_list.append([cn, cn+1])
+
+		#find_sender
+		s_list = []
+		for cn in range(1, w_len-1):
+			s_list.append(cn)
+
+		beta_t = sumProductMPLS(cliq_list, s_list, phi_list)
+		logZ = logSumExp(beta_t[0])
+		t_diff += (tmp_v - logZ)
+
+#	print tmp_v, logZ,  (1/float(N))*(t_diff)
+	y = (1/float(N))*(t_diff)
+	return  (-1) * y
+
+def cal_accuracy(s_para, t_para):
+	"""docstring for obj_ws_func"""
+	predChars = ''
+	trueChars = ''
+	for i in range(200):
+		#find value based on real answer
+		m_t_word = np.matrix(np.genfromtxt("data/test_img"+str(i+1)+".txt")).transpose()
+		r_word = findAns('data/test_words.txt', i)
+		w_len = len(r_word)
+
+		#find phi
+		potent = s_para * m_t_word
+		phi_list = []
+		for cn in range(w_len-1):
+			if cn == w_len-2:
+				phi_list.append(phi(t_para, potent, [cn, cn+1]))
+			else:
+				phi_list.append(phi(t_para, potent, [cn]))
+		
+		#find clique
+		cliq_list = []
+		for cn in range(w_len-1):
+			cliq_list.append([cn, cn+1])
+
+		#find_sender
+		s_list = []
+		for cn in range(1, w_len-1):
+			s_list.append(cn)
+
+		beta_t = sumProductMPLS(cliq_list, s_list, phi_list)
+		pred_word = predWord(beta_t, i)
+	#	print >>out, pred_word, '<->', true_word
+		predChars += pred_word
+		trueChars += r_word
+
+	correctChar = 0
+	for cind in range(len(predChars)):
+		predC = predChars[cind]
+		trueC = trueChars[cind]
+		if predC == trueC:
+			correctChar += 1
+
+	print >>out, 'accuracy', round(float(correctChar)/len(predChars), 5)
+	return round(float(correctChar)/len(predChars), 5)
+#	print 'accuracy', round(float(correctChar)/len(predChars), 3)
+
+out_s_params = open('train_s_params.txt', 'w')
+out_t_params = open('train_t_params.txt', 'w')
+
+def opt():
+	"""docstring for opt"""
+	s_para_ini = np.genfromtxt("model/feature-params.txt")
+	t_para_ini = np.genfromtxt("model/transition-params.txt")
+
+	x1 = np.reshape(s_para_ini, (1, 3210))
+	x2 = np.reshape(t_para_ini, (1, 100))
+	x = np.array(np.concatenate((x1, x2), axis=1))
+	x0 = x[0]
+#	x0 = [0] * 3310
+	s_para = []
+	t_para = []
+	for i in [80]:
+#	for i in [50, 100, 150, 200, 250, 300, 350, 400]:
+		N = i
+#		obj_ws_deriv(x0, (N,))
+		opt = fmin_l_bfgs_b(obj_ws_func, x0, fprime=obj_ws_deriv, args=(N,))
+#		opt = fmin_l_bfgs_b(obj_ws_func, x0, args=(N,), approx_grad=True)
+		xopt = opt[0]
+		print opt
+		print xopt
+		s_para = np.reshape(xopt[0:3210], (10, 321))
+		t_para = np.reshape(xopt[3210:3310], (10, 10))
+		print >>out_s_params, [s_para[x, y] for x in range(10) for y in range(321)]
+		print >>out_s_params, '\n', '\n', '\n'
+		print >>out_t_params, [t_para[x, y] for x in range(10) for y in range(10)]
+		print >>out_t_params, '\n', '\n', '\n'
+
+		print 'training case = ', i, 'accuracy = ', cal_accuracy(s_para, t_para)
+
+	#print transit params
+	img_pix = t_para
+	charA = np.asarray(['e', 't', 'a', 'i', 'n', 'o', 's', 'h', 'r', 'd'])
+	imgplot = plt.imshow(img_pix, interpolation='nearest')
+	plt.xticks(range(10), charA)
+	plt.yticks(range(10), charA)
+	plt.colorbar()
+	plt.savefig('t_params.png')
+#	plt.show()
+
+	#print single params
+	for ind, row in enumerate(s_para):
+		plt.clf()
+		img_pix = np.reshape(row[1:321], (20, 16))
+		imgplot = plt.imshow(img_pix, cmap=cm.Greys_r, interpolation='nearest')
+		img_n = 's_params'+str(ind)+'.png'
+		plt.savefig(img_n)
+#		plt.show()
 
 def q4():
 	"""docstring for q4"""
 	x = [10,10]
-	xopt = fmin_bfgs(obj_func, x, fprime=obj_deriv)
+	xopt = fmin_l_bfgs_b(obj_func, x, fprime=obj_deriv)
 	print xopt
 
 def sumProductMPLS(cliqs, senders, lams):
@@ -162,17 +400,20 @@ def sumProductMPLS(cliqs, senders, lams):
 
 def logSumExp(table):
 	#table is in log space
-	logZ = []
-	for tp in table:
-		c = tp.max()
-		size = np.shape(tp)
-		temp_sum = 0
-		for i in range(size[0]):
-			for j in range(size[1]):
-				temp_sum += np.exp(tp[i,j]-c)
-		logZ.append(c + np.log(temp_sum))
+	lst1 = []
+	for i in range(10):
+		m = np.max(table[i,:])
+		t_m = 0
+		for j in range(10):
+			t_m += np.exp(table[i,j]-m)
+		lst1.append(m+np.log(t_m))
 
-	return logZ
+	m = np.max(lst1)
+	t_m = 0
+	for e in lst1:
+		t_m += np.exp(e-m)
+
+	return m+np.log(t_m)
 	
 def phi(t_para, n_potent, cond):
 	#condition squence 
@@ -308,7 +549,7 @@ def q2():
 	predChars = ''
 	trueChars = ''
 	correctChar = 0
-	for i in range(200):
+	for i in range(1):
 		data = np.matrix(np.genfromtxt("data/test_img"+str(i+1)+".txt"))
 		n_potent = para*data.transpose()
 		size = np.shape(data)
@@ -333,7 +574,7 @@ def q2():
 			s_list.append(cn)
 
 		beta_t = sumProductMPLS(cliq_list, s_list, phi_list)
-#		print >>out, '----', beta_t
+#		print '----', [np.sum(b) for b in beta_t]
 #		logZ_list = logSumExp(beta_t)
 #		print 'logZ', logZ		
 
@@ -352,13 +593,15 @@ def q2():
 		if predC == trueC:
 			correctChar += 1
 
-	print >>out, 'accuracy', round(float(correctChar)/len(predChars), 3)
+	print >>out, 'accuracy', round(float(correctChar)/len(predChars), 5)
 #	print 'accuracy', round(float(correctChar)/len(predChars), 3)
+
 
 def main():
 #	q1()
-	q2()
+#	q2()
 #	q4()
+	opt()
 
 if __name__ == '__main__':
 	main()
